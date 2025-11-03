@@ -1,0 +1,35 @@
+Oversigt over ETL-pipelinen
+==========================
+
+Projektet indeholder fire små Python-moduler, der holder ETL-historien meget
+simpel.
+
+Extract (``Extract.py``)
+------------------------
+* **Formål:** Læse de CSV-filer, der ligger i repoet.
+* **Nøglerutine:** ``extract_data`` indlæser ``orders.csv``, ``order_items.csv``
+  og ``customers.csv`` i pandas-DataFrames og returnerer dem i en ordbog.
+
+Transform (``Transform.py``)
+----------------------------
+* **Formål:** Bygge en enkelt, brugervenlig tabel ud fra de rå dele.
+* **Nøglerutine:** ``build_order_summary`` parser ordredatoer, beregner en
+  ``order_total`` pr. ordre og tilføjer en ``customer_name``-kolonne, så hver
+  række er let at forstå.
+
+Load (``Load.py``)
+------------------
+* **Formål:** Gemme oversigtstabellen i PostgreSQL med helt korte SQL-sætninger.
+* **Nøglerutine:** ``load_order_summary`` dropper og genskaber tabellen
+  ``order_summary`` og indsætter derefter hver række fra oversigts-DataFrame'en.
+  Hjælperen bygger på ``create_connection``, der læser simple
+  ``POSTGRES_*``-miljøvariabler (eller bruger standardværdier) for at forbinde
+  via psycopg2.
+
+Hovedindgangspunkt (``main.py``)
+--------------------------------
+* **Formål:** Lime de tre trin sammen.
+* **Kørselsforløb:** ``run_pipeline`` ekstraherer CSV-dataene, bygger
+  oversigtstabellen, viser de første rækker og indlæser til sidst dataene i
+  PostgreSQL. Når du kører ``python main.py``, gennemføres hele processen fra
+  ende til anden.

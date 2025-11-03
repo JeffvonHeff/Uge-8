@@ -1,0 +1,10 @@
+Oversigt over relationer i CSV-data
+===================================
+order_id: orders, order_items
+customer_id: orders, customers
+store_id: orders, stores, stocks, staffs
+category_id: products, categories
+staff_id: orders, staffs
+product_id: order_items, products, stocks
+brand_id: brands, products
+

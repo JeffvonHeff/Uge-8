@@ -1,0 +1,45 @@
+Sådan starter du PostgreSQL med Docker (for begyndere)
+=====================================================
+
+1. Start database-containeren
+   --------------------------
+   Kør kommandoen nedenfor i en terminal. Den henter PostgreSQL-imaget (hvis det
+   mangler) og starter en container, der lytter på port ``5432``.
+
+   ````
+   docker run --name etl-postgres \
+     -e POSTGRES_USER=etl_user \
+     -e POSTGRES_PASSWORD=etl_password \
+     -e POSTGRES_DB=etl_db \
+     -p 5432:5432 \
+     -d postgres:16
+   ````
+
+2. Fortæl ETL-scriptet, hvordan det skal forbinde
+   ---------------------------------------------
+   Eksportér de samme indstillinger, så ``Load.create_connection`` kan nå
+   databasen. Du behøver kun gøre det én gang pr. terminalsession.
+
+   ````
+   export POSTGRES_USER=etl_user
+   export POSTGRES_PASSWORD=etl_password
+   export POSTGRES_DATABASE=etl_db
+   export POSTGRES_HOST=127.0.0.1
+   export POSTGRES_PORT=5432
+   ````
+
+3. Kør pipelinen
+   -------------
+   ````
+   python main.py
+   ````
+
+   Scriptet udskriver hvert trin og fortæller, hvor mange rækker der blev gemt i
+   tabellen ``order_summary``.
+
+4. Stop og fjern containeren (valgfrit)
+   -----------------------------------
+   ````
+   docker stop etl-postgres
+   docker rm etl-postgres
+   ````
