@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, List, Sequence, Set
+from typing import Callable, Dict, Iterable, List, Sequence, Set, Tuple
 
 from getpass import getpass
 import psycopg2
@@ -15,6 +15,9 @@ from Load import create_connection, load_core_tables, load_order_summary
 
 # CLI permissions are a simplified view of what each database role can do in the
 # interactive helper. Actual database privileges are managed in schema.sql.
+StoreContext = Tuple[int, str]
+
+
 ROLE_PERMISSIONS: Dict[str, Set[str]] = {
     "admin": {"load_data", "create", "read", "update", "delete"},
     "customer": {"read"},
@@ -104,11 +107,22 @@ def run_pipeline() -> None:
         for item in accessible_data:
             print(f" - {item}")
 
+    store_context: StoreContext | None = None
+    if role == "store":
+        store_context = _prompt_for_store_selection()
+        if store_context is None:
+            print("Unable to continue without selecting a store. Goodbye.")
+            return
+        store_id, store_name = store_context
+        print(f"Connected to store '{store_name}' (ID {store_id}).")
+
     action_handlers: Dict[str, Callable[[], None]] = {
         "load_data": _handle_load_data,
         "create": lambda: _with_connection(_handle_create_customer),
         "read": lambda: _with_connection(
-            lambda connection: _handle_read_customer(connection, role)
+            lambda connection: _handle_read_customer(
+                connection, role, store_context
+            )
         ),
         "update": lambda: _with_connection(_handle_update_customer),
         "delete": lambda: _with_connection(_handle_delete_customer),
@@ -230,9 +244,19 @@ def _handle_create_customer(connection: PGConnection) -> None:
         print(f"Failed to create customer: {exc}")
 
 
-def _handle_read_customer(connection: PGConnection, role: str | None = None) -> None:
+def _handle_read_customer(
+    connection: PGConnection,
+    role: str | None = None,
+    store_context: StoreContext | None = None,
+) -> None:
     if role == "customer":
         _handle_customer_self_service(connection)
+        return
+    if role == "store":
+        if store_context is None:
+            print("No store selected. Cannot read data.")
+            return
+        _handle_store_portal(connection, store_context)
         return
 
     identifier = input(
@@ -363,6 +387,189 @@ def _handle_customer_self_service(connection: PGConnection) -> None:
             continue
         print("   Items:")
         for (_, item_id, product_name, quantity, list_price, discount) in order_items_list:
+            print(
+                "     "
+                f"#{item_id} {product_name} - qty {quantity}, price {list_price},"
+                f" discount {discount}"
+            )
+
+
+def _prompt_for_store_selection() -> StoreContext | None:
+    try:
+        connection = create_connection()
+    except psycopg2.Error as exc:
+        print(f"Could not connect to the database to fetch stores: {exc}")
+        return None
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT store_id, store_name, city, state
+                FROM stores
+                ORDER BY store_id
+                """
+            )
+            stores = cursor.fetchall()
+    except psycopg2.Error as exc:
+        print(f"Failed to load store list: {exc}")
+        return None
+    finally:
+        connection.close()
+
+    if not stores:
+        print("No stores available to connect to.")
+        return None
+
+    print("\nAvailable stores:")
+    for store_id, store_name, city, state in stores:
+        location = f"{city}, {state}".strip(", ")
+        print(f" - {store_id}: {store_name} ({location})")
+
+    while True:
+        selection = input("Enter the ID of the store to connect as: ").strip()
+        try:
+            store_id = int(selection)
+        except ValueError:
+            print("Store ID must be a number.")
+            continue
+
+        for candidate_id, store_name, *_ in stores:
+            if candidate_id == store_id:
+                return store_id, store_name
+
+        print("Invalid store ID. Please choose one of the listed stores.")
+
+
+def _handle_store_portal(connection: PGConnection, store_context: StoreContext) -> None:
+    store_id, store_name = store_context
+    print(f"\nViewing data for store '{store_name}' (ID {store_id}).")
+
+    identifier = input(
+        "Enter a customer ID to view their orders for this store, or press enter to list all orders: "
+    ).strip()
+
+    if not identifier:
+        _list_store_orders(connection, store_id)
+        return
+
+    try:
+        customer_id = int(identifier)
+    except ValueError:
+        print("Customer ID must be an integer.")
+        return
+
+    _show_store_customer_orders(connection, store_id, customer_id)
+
+
+def _list_store_orders(connection: PGConnection, store_id: int) -> None:
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT o.order_id, o.order_status, o.order_date, o.required_date,
+                       o.shipped_date, c.customer_id, c.first_name, c.last_name
+                FROM orders AS o
+                JOIN customers AS c ON c.customer_id = o.customer_id
+                WHERE o.store_id = %s
+                ORDER BY o.order_date
+                """,
+                (store_id,),
+            )
+            orders = cursor.fetchall()
+    except psycopg2.Error as exc:
+        print(f"Failed to read order data: {exc}")
+        return
+
+    if not orders:
+        print("No orders found for this store.")
+        return
+
+    print("Orders for this store:")
+    for order in orders:
+        (
+            order_id,
+            status,
+            order_date,
+            required_date,
+            shipped_date,
+            customer_id,
+            first_name,
+            last_name,
+        ) = order
+        print(
+            f" - Order {order_id} (status {status}) for customer {customer_id}: "
+            f"{first_name} {last_name}"
+        )
+        print(f"   Placed: {order_date}  Required: {required_date}")
+        if shipped_date:
+            print(f"   Shipped: {shipped_date}")
+
+
+def _show_store_customer_orders(
+    connection: PGConnection, store_id: int, customer_id: int
+) -> None:
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT first_name, last_name, email FROM customers WHERE customer_id = %s",
+                (customer_id,),
+            )
+            customer = cursor.fetchone()
+
+            cursor.execute(
+                """
+                SELECT order_id, order_status, order_date, required_date, shipped_date
+                FROM orders
+                WHERE store_id = %s AND customer_id = %s
+                ORDER BY order_date
+                """,
+                (store_id, customer_id),
+            )
+            orders = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT oi.order_id, oi.item_id, p.product_name, oi.quantity,
+                       oi.list_price, oi.discount
+                FROM order_items AS oi
+                JOIN orders AS o ON o.order_id = oi.order_id
+                JOIN products AS p ON p.product_id = oi.product_id
+                WHERE o.store_id = %s AND o.customer_id = %s
+                ORDER BY oi.order_id, oi.item_id
+                """,
+                (store_id, customer_id),
+            )
+            order_items = cursor.fetchall()
+    except psycopg2.Error as exc:
+        print(f"Failed to read order data: {exc}")
+        return
+
+    if customer is None or not orders:
+        print("No orders for this customer at the selected store.")
+        return
+
+    first_name, last_name, email = customer
+    print(
+        f"\nCustomer {customer_id}: {first_name} {last_name} <{email}>"
+        "\nOrders at this store:"
+    )
+
+    items_by_order: Dict[int, List[tuple]] = {}
+    for item in order_items:
+        items_by_order.setdefault(item[0], []).append(item)
+
+    for order in orders:
+        order_id, status, order_date, required_date, shipped_date = order
+        print(f" - Order {order_id} (status {status})")
+        print(f"   Placed: {order_date}  Required: {required_date}")
+        if shipped_date:
+            print(f"   Shipped: {shipped_date}")
+        items = items_by_order.get(order_id, [])
+        if not items:
+            continue
+        print("   Items:")
+        for (_, item_id, product_name, quantity, list_price, discount) in items:
             print(
                 "     "
                 f"#{item_id} {product_name} - qty {quantity}, price {list_price},"
