@@ -1,0 +1,22 @@
+Security Improvement Suggestions
+================================
+
+1. Replace the demo passwords in ``main.py`` with hashed values stored in a
+   dedicated credentials store (for example, environment variables, a vault
+   service, or PostgreSQL roles with LOGIN). Authenticate users against that
+   system instead of keeping secrets in source control.
+2. Enable row-level security (RLS) on tables such as ``customers``,
+   ``orders`` and ``order_items``. Define policies that restrict access to the
+   appropriate rows for each role (for instance, limiting customer logins to
+   their own records).
+3. Create dedicated application users that inherit from the NOLOGIN roles
+   declared in ``schema.sql``. This separates privilege management from user
+   lifecycle management.
+4. Enforce SSL connections between the application and PostgreSQL to protect
+   credentials and sensitive data in transit.
+5. Implement auditing by turning on ``pgaudit`` or custom logging triggers to
+   capture who accessed or modified critical tables such as ``orders`` and
+   ``staffs``.
+6. Use parameterized secrets management for the ETL pipeline (for example via
+   ``.env`` files ignored by version control) so database connection details are
+   not embedded directly in code.
