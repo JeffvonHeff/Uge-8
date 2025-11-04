@@ -173,26 +173,53 @@ JOIN staffs AS sf ON sf.staff_id = o.staff_id
 JOIN order_items AS oi ON oi.order_id = o.order_id
 JOIN products AS p ON p.product_id = oi.product_id;
 
--- Security roles -----------------------------------------------------------
--- Role with read access to every object in the database.
-CREATE ROLE role_data_reader NOLOGIN;
-GRANT CONNECT ON DATABASE bike_shop TO role_data_reader;
-GRANT USAGE ON SCHEMA public TO role_data_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO role_data_reader;
-GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO role_data_reader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT ON TABLES TO role_data_reader;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT ON SEQUENCES TO role_data_reader;
+-- Remove legacy roles to ensure a clean state before creating the new ones.
+DROP ROLE IF EXISTS role_data_reader;
+DROP ROLE IF EXISTS role_orders_reader;
+DROP ROLE IF EXISTS role_store_staff_reader;
 
--- Role restricted to viewing order activity only.
-CREATE ROLE role_orders_reader NOLOGIN;
-GRANT CONNECT ON DATABASE bike_shop TO role_orders_reader;
-GRANT USAGE ON SCHEMA public TO role_orders_reader;
-GRANT SELECT ON orders, order_items TO role_orders_reader;
+-- Role definitions that mirror the responsibilities outlined in Roles.md.
+DROP ROLE IF EXISTS role_admin;
+CREATE ROLE role_admin NOLOGIN;
+GRANT CONNECT ON DATABASE bike_shop TO role_admin;
+GRANT USAGE ON SCHEMA public TO role_admin;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO role_admin;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO role_admin;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT ALL PRIVILEGES ON TABLES TO role_admin;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT ALL PRIVILEGES ON SEQUENCES TO role_admin;
 
--- Role limited to store and staff directory visibility.
-CREATE ROLE role_store_staff_reader NOLOGIN;
-GRANT CONNECT ON DATABASE bike_shop TO role_store_staff_reader;
-GRANT USAGE ON SCHEMA public TO role_store_staff_reader;
-GRANT SELECT ON stores, staffs TO role_store_staff_reader;
+DROP ROLE IF EXISTS role_customer;
+CREATE ROLE role_customer NOLOGIN;
+GRANT CONNECT ON DATABASE bike_shop TO role_customer;
+GRANT USAGE ON SCHEMA public TO role_customer;
+GRANT SELECT ON customers, orders, order_items TO role_customer;
+
+DROP ROLE IF EXISTS role_warehouse;
+CREATE ROLE role_warehouse NOLOGIN;
+GRANT CONNECT ON DATABASE bike_shop TO role_warehouse;
+GRANT USAGE ON SCHEMA public TO role_warehouse;
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+    orders, stocks, products, brands, categories
+    TO role_warehouse;
+
+DROP ROLE IF EXISTS role_analytics;
+CREATE ROLE role_analytics NOLOGIN;
+GRANT CONNECT ON DATABASE bike_shop TO role_analytics;
+GRANT USAGE ON SCHEMA public TO role_analytics;
+GRANT SELECT ON
+    orders, order_items, customers, brands, products, categories
+    TO role_analytics;
+
+DROP ROLE IF EXISTS role_store;
+CREATE ROLE role_store NOLOGIN;
+GRANT CONNECT ON DATABASE bike_shop TO role_store;
+GRANT USAGE ON SCHEMA public TO role_store;
+GRANT SELECT ON orders, customers, stocks, staffs TO role_store;
+
+DROP ROLE IF EXISTS role_hr;
+CREATE ROLE role_hr NOLOGIN;
+GRANT CONNECT ON DATABASE bike_shop TO role_hr;
+GRANT USAGE ON SCHEMA public TO role_hr;
+GRANT SELECT ON staffs, stores TO role_hr;

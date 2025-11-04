@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, List, Set
+from typing import Callable, Dict, Iterable, List, Sequence, Set
 
+from getpass import getpass
 import psycopg2
 from psycopg2.extensions import connection as PGConnection
 
@@ -12,10 +13,58 @@ from Transform import build_order_summary, prepare_relational_tables
 from Load import create_connection, load_core_tables, load_order_summary
 
 
+# CLI permissions are a simplified view of what each database role can do in the
+# interactive helper. Actual database privileges are managed in schema.sql.
 ROLE_PERMISSIONS: Dict[str, Set[str]] = {
     "admin": {"load_data", "create", "read", "update", "delete"},
-    "manager": {"load_data", "read", "update"},
-    "analyst": {"read"},
+    "customer": {"read"},
+    "warehouse": {"read", "update"},
+    "analytics": {"read"},
+    "store": {"read"},
+    "hr": {"read"},
+}
+
+ROLE_CREDENTIALS: Dict[str, str] = {
+    "admin": "admin123",
+    "customer": "customer123",
+    "warehouse": "warehouse123",
+    "analytics": "analytics123",
+    "store": "store123",
+    "hr": "hr123",
+}
+
+ROLE_DATA_ACCESS: Dict[str, Sequence[str]] = {
+    "admin": ("All tables",),
+    "customer": (
+        "Customers – own profile",
+        "Orders – own orders",
+        "Order items – items from own orders",
+    ),
+    "warehouse": (
+        "Orders",
+        "Stocks",
+        "Products",
+        "Brands",
+        "Categories",
+    ),
+    "analytics": (
+        "Orders",
+        "Order items",
+        "Customers",
+        "Brands",
+        "Products",
+        "Categories",
+    ),
+    "store": (
+        "Orders – for the store",
+        "Customers",
+        "Stocks – for the store",
+        "Staffs – for the store",
+    ),
+    "hr": (
+        "Staffs",
+        "Stores",
+    ),
 }
 
 ACTION_DESCRIPTIONS: Dict[str, str] = {
@@ -44,11 +93,16 @@ def run_pipeline() -> None:
     """Prompt for a role and allow role-specific operations."""
 
     print("Welcome to the ETL and customer management tool.")
-    role = _prompt_for_role()
+    role = _login()
     permissions = ROLE_PERMISSIONS[role]
-    print(
-        f"Logged in as '{role}'. Available actions: {', '.join(sorted(permissions | {'exit'}))}."
-    )
+    allowed_actions = ", ".join(sorted(permissions | {"exit"}))
+    print(f"Logged in as '{role}'. Available actions: {allowed_actions}.")
+
+    accessible_data = ROLE_DATA_ACCESS.get(role, ())
+    if accessible_data:
+        print("Data access granted to:")
+        for item in accessible_data:
+            print(f" - {item}")
 
     action_handlers: Dict[str, Callable[[], None]] = {
         "load_data": _handle_load_data,
@@ -67,13 +121,21 @@ def run_pipeline() -> None:
         handler()
 
 
-def _prompt_for_role() -> str:
-    valid_roles = ", ".join(ROLE_PERMISSIONS)
-    while True:
+def _login() -> str:
+    attempts_remaining = 3
+    valid_roles = ", ".join(sorted(ROLE_PERMISSIONS))
+    while attempts_remaining:
         role = input(f"Enter your role ({valid_roles}): ").strip().lower()
-        if role in ROLE_PERMISSIONS:
+        password = getpass("Enter password: ")
+        if role in ROLE_CREDENTIALS and ROLE_CREDENTIALS[role] == password:
             return role
-        print("Unknown role. Please choose one of:", valid_roles)
+        attempts_remaining -= 1
+        if attempts_remaining == 0:
+            raise SystemExit("Too many failed login attempts. Exiting.")
+        print(
+            "Invalid credentials. Attempts remaining:",
+            attempts_remaining,
+        )
 
 
 def _prompt_for_action(permissions: Set[str]) -> str:
