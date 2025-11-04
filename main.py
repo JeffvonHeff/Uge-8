@@ -107,7 +107,9 @@ def run_pipeline() -> None:
     action_handlers: Dict[str, Callable[[], None]] = {
         "load_data": _handle_load_data,
         "create": lambda: _with_connection(_handle_create_customer),
-        "read": lambda: _with_connection(_handle_read_customer),
+        "read": lambda: _with_connection(
+            lambda connection: _handle_read_customer(connection, role)
+        ),
         "update": lambda: _with_connection(_handle_update_customer),
         "delete": lambda: _with_connection(_handle_delete_customer),
     }
@@ -228,7 +230,11 @@ def _handle_create_customer(connection: PGConnection) -> None:
         print(f"Failed to create customer: {exc}")
 
 
-def _handle_read_customer(connection: PGConnection) -> None:
+def _handle_read_customer(connection: PGConnection, role: str | None = None) -> None:
+    if role == "customer":
+        _handle_customer_self_service(connection)
+        return
+
     identifier = input(
         "Enter a customer ID to look up or press enter to list all customers: "
     ).strip()
@@ -259,6 +265,109 @@ def _handle_read_customer(connection: PGConnection) -> None:
     for row in rows:
         cust_id, first, last, email = row
         print(f" - {cust_id}: {first} {last} <{email}>")
+
+
+def _handle_customer_self_service(connection: PGConnection) -> None:
+    identifier = input("Enter your customer ID to view your data: ").strip()
+    if not identifier:
+        print("A customer ID is required to view data.")
+        return
+
+    try:
+        customer_id = int(identifier)
+    except ValueError:
+        print("Customer ID must be an integer.")
+        return
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT customer_id, first_name, last_name, email, phone,
+                       street, city, state, zip_code
+                FROM customers
+                WHERE customer_id = %s
+                """,
+                (customer_id,),
+            )
+            customer = cursor.fetchone()
+            if customer is None:
+                print("No data found for that customer ID.")
+                return
+
+            cursor.execute(
+                """
+                SELECT order_id, order_status, order_date, required_date, shipped_date
+                FROM orders
+                WHERE customer_id = %s
+                ORDER BY order_date
+                """,
+                (customer_id,),
+            )
+            orders = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT oi.order_id, oi.item_id, p.product_name, oi.quantity,
+                       oi.list_price, oi.discount
+                FROM order_items AS oi
+                JOIN orders AS o ON o.order_id = oi.order_id
+                JOIN products AS p ON p.product_id = oi.product_id
+                WHERE o.customer_id = %s
+                ORDER BY oi.order_id, oi.item_id
+                """,
+                (customer_id,),
+            )
+            order_items = cursor.fetchall()
+    except psycopg2.Error as exc:
+        print(f"Failed to read customer data: {exc}")
+        return
+
+    print("\nCustomer profile:")
+    (
+        cust_id,
+        first_name,
+        last_name,
+        email,
+        phone,
+        street,
+        city,
+        state,
+        zip_code,
+    ) = customer
+    print(f" - ID: {cust_id}")
+    print(f" - Name: {first_name} {last_name}")
+    print(f" - Email: {email}")
+    if phone:
+        print(f" - Phone: {phone}")
+    print(f" - Address: {street}, {city}, {state} {zip_code}")
+
+    if not orders:
+        print("\nNo orders found for this customer.")
+        return
+
+    items_by_order: Dict[int, List[tuple]] = {}
+    for item in order_items:
+        order_id = item[0]
+        items_by_order.setdefault(order_id, []).append(item)
+
+    print("\nOrders:")
+    for order in orders:
+        order_id, status, order_date, required_date, shipped_date = order
+        print(f" - Order {order_id} (status {status})")
+        print(f"   Placed: {order_date}  Required: {required_date}")
+        if shipped_date:
+            print(f"   Shipped: {shipped_date}")
+        order_items_list = items_by_order.get(order_id, [])
+        if not order_items_list:
+            continue
+        print("   Items:")
+        for (_, item_id, product_name, quantity, list_price, discount) in order_items_list:
+            print(
+                "     "
+                f"#{item_id} {product_name} - qty {quantity}, price {list_price},"
+                f" discount {discount}"
+            )
 
 
 def _handle_update_customer(connection: PGConnection) -> None:
