@@ -17,6 +17,10 @@ Security Improvement Suggestions
 5. Implement auditing by turning on ``pgaudit`` or custom logging triggers to
    capture who accessed or modified critical tables such as ``orders`` and
    ``staffs``.
-6. Use parameterized secrets management for the ETL pipeline (for example via
-   ``.env`` files ignored by version control) so database connection details are
-   not embedded directly in code.
+6. Introduce parameterized secrets management for the ETL pipeline. Load database
+   URLs, credentials and API tokens from environment variables or an encrypted
+   secrets backend (for example HashiCorp Vault, Azure Key Vault or runtime
+   ``.env`` files that stay outside version control) and inject them into the
+   pipeline at startup. Update helpers such as the connection factory so they
+   read secrets from those parameters rather than literals committed to source
+   control, and document how to rotate the values for each environment.

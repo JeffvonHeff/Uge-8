@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Dict, Iterable, Sequence, Tuple
 
 import pandas as pd
@@ -10,23 +11,57 @@ import psycopg2
 from psycopg2.extensions import connection as PGConnection
 from psycopg2.extras import execute_values
 
-# Default connection details. Override them with POSTGRES_* environment variables
-# if your database uses different values.
+# Only host/port have in-repository defaults. Credentials must be supplied via
+# environment variables so they are not committed to source control.
 DEFAULT_SETTINGS: Dict[str, str] = {
     "POSTGRES_HOST": "127.0.0.1",
     "POSTGRES_PORT": "5432",
-    "POSTGRES_DATABASE": "etl_db",
-    "POSTGRES_USER": "etl_user",
-    "POSTGRES_PASSWORD": "etl_password",
 }
+
+REQUIRED_SETTINGS = ("POSTGRES_DATABASE", "POSTGRES_USER", "POSTGRES_PASSWORD")
+
+
+def _load_env_file(path: Path = Path(".env")) -> None:
+    """Populate environment variables from a .env file if one exists."""
+
+    if not path.is_file():
+        return
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
 
 
 def get_database_settings() -> Dict[str, str]:
-    """Collect simple connection settings from the environment."""
+    """Collect connection settings from environment variables."""
 
-    settings = {
-        name: os.getenv(name, default) for name, default in DEFAULT_SETTINGS.items()
-    }
+    _load_env_file()
+
+    settings: Dict[str, str] = {}
+    for name, default in DEFAULT_SETTINGS.items():
+        settings[name] = os.getenv(name, default)
+
+    missing = []
+    for name in REQUIRED_SETTINGS:
+        value = os.getenv(name)
+        if value is None:
+            missing.append(name)
+        else:
+            settings[name] = value
+
+    if missing:
+        required = ", ".join(sorted(missing))
+        raise RuntimeError(
+            "Missing required database settings. Define the following environment "
+            f"variables (for example via a .env file or secrets manager): {required}"
+        )
+
     return settings
 
 

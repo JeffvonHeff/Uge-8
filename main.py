@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from typing import Callable, Dict, Iterable, List, Sequence, Set, Tuple
-
-from getpass import getpass
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extensions import connection as PGConnection
 
 from Extract import extract_data
@@ -142,7 +141,7 @@ def _login() -> str:
     valid_roles = ", ".join(sorted(ROLE_PERMISSIONS))
     while attempts_remaining:
         role = input(f"Enter your role ({valid_roles}): ").strip().lower()
-        password = getpass("Enter password: ")
+        password = _prompt_for_password("Enter password: ")
         if role in ROLE_CREDENTIALS and ROLE_CREDENTIALS[role] == password:
             return role
         attempts_remaining -= 1
@@ -153,6 +152,9 @@ def _login() -> str:
             attempts_remaining,
         )
 
+
+def _prompt_for_password(prompt: str) -> str:
+    return input(prompt)
 
 def _prompt_for_action(permissions: Set[str]) -> str:
     allowed_actions = sorted(permissions | {"exit"})
@@ -603,11 +605,15 @@ def _handle_update_customer(connection: PGConnection) -> None:
         print("No value provided. Update cancelled.")
         return
 
-    sql = f"UPDATE customers SET {field_name} = %s WHERE customer_id = %s"
     try:
         with connection:
             with connection.cursor() as cursor:
-                cursor.execute(sql, (new_value, customer_id))
+                cursor.execute(
+                    sql.SQL("UPDATE customers SET {field} = %s WHERE customer_id = %s").format(
+                        field=sql.Identifier(field_name)
+                    ),
+                    (new_value, customer_id),
+                )
                 if cursor.rowcount == 0:
                     print("Customer not found.")
                     return
